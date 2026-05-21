@@ -66,14 +66,15 @@ def generate_ai_briefing(accumulating_sectors, distributing_sectors):
 @st.cache_data(ttl=3600)
 def fetch_market_insights(_vol_sensitivity_param):
     try:
-        # Fetch SPY benchmark using explicitly flattened index properties
-        bench = yf.download("SPY", period="6m", progress=False, auto_adjust=True, multi_level_index=False)
+        # FIXED: Changed period from "6m" to "6mo" and applied universal index flattening
+        bench = yf.download("SPY", period="6mo", progress=False, auto_adjust=True, multi_level_index=False)
         if bench.empty or len(bench) < 30:
             return pd.DataFrame()
         
-        # Standardize MultiIndex structures into simple clean columns if forced by the API
         if isinstance(bench.columns, pd.MultiIndex):
-            bench.columns = [col[0] if isinstance(col, tuple) else col for col in bench.columns]
+            bench.columns = [str(col[0]) if isinstance(col, tuple) else str(col) for col in bench.columns]
+        else:
+            bench.columns = [str(col) for col in bench.columns]
             
         bench['B_Ret'] = bench['Close'].pct_change(periods=20)
     except Exception as e:
@@ -83,17 +84,18 @@ def fetch_market_insights(_vol_sensitivity_param):
     sector_rows = []
     for etf, name in SECTOR_MAP.items():
         try:
-            # Download specific target sector data matrix
-            sec_df = yf.download(etf, period="6m", progress=False, auto_adjust=True, multi_level_index=False)
+            # FIXED: Changed period from "6m" to "6mo"
+            sec_df = yf.download(etf, period="6mo", progress=False, auto_adjust=True, multi_level_index=False)
             if sec_df.empty or len(sec_df) < 30:
                 continue
                 
             if isinstance(sec_df.columns, pd.MultiIndex):
-                sec_df.columns = [col[0] if isinstance(col, tuple) else col for col in sec_df.columns]
+                sec_df.columns = [str(col[0]) if isinstance(col, tuple) else str(col) for col in sec_df.columns]
+            else:
+                sec_df.columns = [str(col) for col in sec_df.columns]
                 
             sec_df['S_Ret'] = sec_df['Close'].pct_change(periods=20)
             
-            # Mathematics processing via structural float isolates
             recent_vol = float(sec_df['Volume'].iloc[-5:].mean())
             base_vol = float(sec_df['Volume'].mean())
             vol_mult = recent_vol / base_vol if base_vol > 0 else 0
@@ -102,7 +104,6 @@ def fetch_market_insights(_vol_sensitivity_param):
             p_alpha = float(sec_df['S_Ret'].iloc[-5] - bench['B_Ret'].iloc[-5])
             accel = c_alpha - p_alpha
             
-            # Status resolution architecture logic
             if vol_mult > _vol_sensitivity_param and accel > 0:
                 status = "Institutional Inflow"
             elif vol_mult > _vol_sensitivity_param and accel <= 0:
@@ -128,15 +129,11 @@ if st.button("Run Complete Market Scan", type="primary"):
         df_insights = fetch_market_insights(vol_sensitivity)
         
         if not df_insights.empty:
-            # Isolate categories for the local AI summary generation pipeline
             acc_sectors = df_insights[df_insights["Status"] == "Institutional Inflow"]["Sector"].tolist()
             dist_sectors = df_insights[df_insights["Status"] == "Distribution"]["Sector"].tolist()
             
-            # Render structured briefing box
             st.info(generate_ai_briefing(acc_sectors, dist_sectors))
-            
-            # Render quant core summary database frame
             st.subheader("📊 Quant Flow Matrix Summary")
             st.dataframe(df_insights, use_container_width=True, hide_index=True)
         else:
-            st.error("Market feeds cannot be loaded. Please ensure you have run 'pip install --upgrade yfinance' in your console.")
+            st.error("Market feeds cannot be loaded. Check your network or connection.")
